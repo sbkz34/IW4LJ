@@ -59,9 +59,9 @@ jobs:
             echo "NDK_BIN=$BIN"
             echo "ANDROID_NDK_HOME=$NDK"
             echo "ANDROID_NDK_ROOT=$NDK"
-            echo "CC_aarch64-linux-android=$BIN/aarch64-linux-android$API-clang"
-            echo "CXX_aarch64-linux-android=$BIN/aarch64-linux-android$API-clang++"
-            echo "AR_aarch64-linux-android=$BIN/llvm-ar"
+            echo "CC_aarch64_linux_android=$BIN/aarch64-linux-android$API-clang"
+            echo "CXX_aarch64_linux_android=$BIN/aarch64-linux-android$API-clang++"
+            echo "AR_aarch64_linux_android=$BIN/llvm-ar"
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android$API-clang"
           } >> "$GITHUB_ENV"
 
