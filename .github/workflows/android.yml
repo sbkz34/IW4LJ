@@ -1,0 +1,139 @@
+# Builds the Android APK on a GitHub-hosted Linux runner (sbkz34 fork).
+#
+# Actions tab -> "Android build" -> Run workflow. The APK is attached to a
+# release named "Android build N" (downloadable straight from the phone) and to
+# the run as the IW4LJ-apk artifact.
+#
+# This is a bash port of IW4LJ-Android/crates/android/package.ps1.
+name: Android build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "IW4LJ-Android/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: write
+
+env:
+  NDK_VERSION: "28.2.13676358"
+  BUILD_TOOLS: "34.0.0"
+  API: "31"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: IW4LJ-Android
+    steps:
+      - name: Free disk space
+        working-directory: /
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/node_modules /opt/ghc /usr/local/.ghcup \
+            /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK and NDK
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS" "platforms;android-34" > /dev/null
+          NDK="$SDK/ndk/$NDK_VERSION"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          {
+            echo "SDK=$SDK"
+            echo "NDK=$NDK"
+            echo "NDK_BIN=$BIN"
+            echo "ANDROID_NDK_HOME=$NDK"
+            echo "ANDROID_NDK_ROOT=$NDK"
+            echo "CC_aarch64-linux-android=$BIN/aarch64-linux-android$API-clang"
+            echo "CXX_aarch64-linux-android=$BIN/aarch64-linux-android$API-clang++"
+            echo "AR_aarch64-linux-android=$BIN/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android$API-clang"
+          } >> "$GITHUB_ENV"
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: IW4LJ-Android
+          key: android
+
+      - name: Build the library
+        run: cargo build -p iw4l-android --profile play --target aarch64-linux-android
+
+      - name: Package the APK
+        run: |
+          set -euo pipefail
+          CRATE=crates/android
+          OUT="$PWD/build"
+          TOOLS="$SDK/build-tools/$BUILD_TOOLS"
+          JAR="$SDK/platforms/android-34/android.jar"
+          SO=target/aarch64-linux-android/play/libiw4l_android.so
+          CXX_SO="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+          test -f "$SO" && test -f "$CXX_SO"
+
+          rm -rf "$OUT" && mkdir -p "$OUT/classes" "$OUT/dex" "$OUT/stage/lib/arm64-v8a"
+
+          # Java activities -> dex
+          javac -source 17 -target 17 -classpath "$JAR" -d "$OUT/classes" \
+            "$CRATE/android/java/dev/iw4j/iw4l/GameActivity.java" \
+            "$CRATE/android/java/dev/iw4j/iw4l/LaunchActivity.java"
+          jar cf "$OUT/classes.jar" -C "$OUT/classes" .
+          "$TOOLS/d8" --lib "$JAR" --min-api 31 --output "$OUT/dex" "$OUT/classes.jar"
+
+          # Manifest and resources
+          "$TOOLS/aapt2" compile --dir "$CRATE/res" -o "$OUT/res.zip"
+          "$TOOLS/aapt2" link -o "$OUT/base.apk" -I "$JAR" \
+            --manifest "$CRATE/android/AndroidManifest.xml" \
+            --min-sdk-version 31 --target-sdk-version 34 "$OUT/res.zip"
+
+          # dex and native libraries, stored uncompressed so the loader can map them
+          cp "$OUT/dex/classes.dex" "$OUT/stage/"
+          "$NDK_BIN/llvm-strip" --strip-all -o "$OUT/stage/lib/arm64-v8a/libiw4l_android.so" "$SO"
+          cp "$CXX_SO" "$OUT/stage/lib/arm64-v8a/"
+          (cd "$OUT/stage" && zip -0 -r "$OUT/base.apk" classes.dex lib)
+
+          # Align and sign with the fork's fixed key, so each build installs over the last
+          base64 -d "$CRATE/iw4lj-ci.keystore.b64" > "$OUT/ci.keystore"
+          "$TOOLS/zipalign" -p -f 4 "$OUT/base.apk" "$OUT/aligned.apk"
+          "$TOOLS/apksigner" sign --ks "$OUT/ci.keystore" --ks-pass pass:iw4lj-ci-pass \
+            --ks-key-alias iw4lj --key-pass pass:iw4lj-ci-pass \
+            --out "$OUT/IW4LJ-sbkz.apk" "$OUT/aligned.apk"
+          "$TOOLS/apksigner" verify "$OUT/IW4LJ-sbkz.apk"
+          ls -lh "$OUT/IW4LJ-sbkz.apk"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: IW4LJ-apk
+          path: IW4LJ-Android/build/IW4LJ-sbkz.apk
+          if-no-files-found: error
+
+      - name: Publish as a release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-sbkz-${{ github.run_number }}
+          name: Android build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          files: IW4LJ-Android/build/IW4LJ-sbkz.apk
+          body: |
+            APK du fork sbkz34 (commit ${{ github.sha }}).
+            Démarrage non bloquant : corrige l'appli tuée au chargement sur les téléphones plus lents (HyperOS, MediaTek).

@@ -5,6 +5,10 @@
 # A Vulkan pipeline cache kept on disk (vendor/bevy_render/src/render_resource/
 # disk_pipeline_cache.rs): a phone GPU spends minutes compiling a map's pipelines.
 bevy_render = { path = "vendor/bevy_render" }
+# IW4LJ fork: start-up no longer blocks the activity's Java thread while the
+# native side loads the menus (vendor/android-activity/src/native_activity/glue.rs,
+# look for "IW4LJ patch"). Without it a slower phone is killed as hung at launch.
+android-activity = { path = "vendor/android-activity" }
 quinn-proto = { git = "https://github.com/quinn-rs/quinn", rev = "f650e0f213b01ea7bebd60023e5df7df65e5c2bd" }
 
 [workspace]
@@ -78,7 +82,7 @@ members = [
     "crates/updater",
     "crates/weapon_iw4",
     "crates/xmodel_runtime",
-    "xtask",
+    # "xtask" is not in the public repository (its Cargo.toml is missing).
 ]
 
 [workspace.package]
