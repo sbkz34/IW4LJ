@@ -62,6 +62,11 @@ jobs:
             echo "CC_aarch64_linux_android=$BIN/aarch64-linux-android$API-clang"
             echo "CXX_aarch64_linux_android=$BIN/aarch64-linux-android$API-clang++"
             echo "AR_aarch64_linux_android=$BIN/llvm-ar"
+            # perfetto-sdk-sys forces the host `clang++` unless CXX is set; host
+            # build scripts keep the system compiler through HOST_CXX.
+            echo "CXX=$BIN/aarch64-linux-android$API-clang++"
+            echo "HOST_CXX=c++"
+            echo "HOST_CC=cc"
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android$API-clang"
           } >> "$GITHUB_ENV"
 
