@@ -38,10 +38,10 @@ jobs:
             /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell
           df -h /
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -77,7 +77,21 @@ jobs:
           key: android
 
       - name: Build the library
-        run: cargo build -p iw4l-android --profile play --target aarch64-linux-android
+        run: |
+          set -o pipefail
+          cargo build -p iw4l-android --profile play --target aarch64-linux-android \
+            --message-format=short 2>&1 | tee build.log
+
+      # Surfaces the compiler errors as run annotations, readable without the full log.
+      - name: Report build errors
+        if: failure()
+        run: |
+          test -f build.log || exit 0
+          grep -n -E "^(error|warning: build failed)|error\[|error:|panicked|failed to run custom build|undefined reference|ld\.lld: error|fatal error" build.log \
+            | head -40 > errors.txt || true
+          { echo "--- tail ---"; tail -60 build.log; } >> errors.txt
+          body=$(sed -e 's/%/%25/g' errors.txt | awk '{printf "%s%%0A", $0}')
+          echo "::error title=cargo build::${body:0:60000}"
 
       - name: Package the APK
         run: |
